@@ -45,7 +45,7 @@ void *reuse_block(size_t size)
                 b->in_use = 1;
                 return b;
             }
-            b = b->next;
+            b = (struct head_*)b->next;
         }
     }
     else if (BEST_FIT)
@@ -63,7 +63,7 @@ void *reuse_block(size_t size)
               }
               if(res?res->size>b->size:1)res=b;
             }
-            b = b->next;
+            b = (struct head_*)b->next;
             //printf("no match\n");
         }
         if(res)res->in_use=1;
@@ -84,7 +84,7 @@ void *reuse_block(size_t size)
             }
      b = b->next?b->next:heap_start;
      //printf("%p->[%p]  %p::%p\n", b, b?b->next:0, last_fit, heap_start);
-     if((b==heap_start&&last_fit==0)||b==last_fit){
+     if((b==((struct head_*)heap_start)&&last_fit==0)||b==last_fit){
        //printf("not found\n");
        return 0;
      }
