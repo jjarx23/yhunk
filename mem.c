@@ -22,6 +22,9 @@ struct blk_
 #define BEST_FIT 01
 #define NEXT_FIT 1
 
+#define TIMER clock()
+#define TTIME(t) (((double)(clock()-t))/CLOCKS_PER_SEC)
+
 blk_t *heap_start = 0;
 blk_t *top;
 blk_t *last_fit = 0;
@@ -124,8 +127,7 @@ int main()
 
     clock_t t;
 
-    t = clock();
-
+    t = TIMER;
     // work here
     int i = 100000;
     int j=0;
@@ -144,13 +146,10 @@ while(j){
   j--;
   free(_[j]);
 }
-    t = clock() - t;
 
-    double time_taken = ((double)t) / CLOCKS_PER_SEC; // in seconds
+    printf(" took %f seconds to execute \n", TTIME(t));
 
-    printf(" took %f seconds to execute \n", time_taken);
-
-    t = clock();
+    t = TIMER;
 
     // work here
     i = 100000;
@@ -170,10 +169,6 @@ while(j){
   afree(_[j]);
 }
 
-    t = clock() - t;
-
-    time_taken = ((double)t) / CLOCKS_PER_SEC; // in secon>
-
-    printf(" took %f seconds to execute \n", time_taken);
+    printf(" took %f seconds to execute \n", TTIME(t));
     return 0;
 }
