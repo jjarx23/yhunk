@@ -8,7 +8,7 @@
 typedef struct blk_ blk_t;
 struct head_
 {
-    blk_t *next;
+    blk_t *nxt;
     size_t size;
     char in_use;
 };
@@ -17,6 +17,14 @@ struct blk_
     struct head_ head;
     char ptr;
 };
+
+#define BLK(B)((blk_t*)(B))
+static inline blk_t* NEXT(blk_t *b){
+    return BLK(b)->head.nxt;
+}
+static inline blk_t* SET_NEXT(blk_t *b, blk_t*s){
+    return BLK(b)->head.nxt=(s);
+}
 
 #define ALIGN(n) (n + sizeof(void *) - 1) & ~(sizeof(void *) - 1)
 #define META_RESIZE(n) (sizeof(struct head_) + n)
@@ -79,16 +87,16 @@ static inline void adjust_free_list(blk_t *b, blk_t *prev, blk_t *next)
 static inline void *fix_free_list(blk_t *b)
 {
     b->head.in_use = 1;
-    adjust_free_list(b, PREV(b), b->head.next);
-    if (b->head.next)
+    adjust_free_list(b, PREV(b), NEXT(b));
+    if (NEXT(b))
     {
-        blk_t *_ = PREV(b->head.next);
-        PREV(b->head.next) = PREV(b);
+        blk_t *_ = PREV(NEXT(b));
+        PREV(NEXT(b)) = PREV(b);
     }
     if (PREV(b))
     {
         blk_t *_ = PREV(b);
-        PREV(b)->head.next = b->head.next;
+        SET_NEXT(PREV(b), NEXT(b));
         int i = 0;
     }
     // PREV(b->head.next) =
@@ -101,33 +109,33 @@ static void *reuse_block(size_t size)
         return 0;
     if (FIRST_FIT)
     {
-        struct head_ *b = (struct head_ *)FREELIST;
+        blk_t *b = FREELIST;
         while (b)
         {
-            if (b->size >= size && !b->in_use)
+            if (b->head.size >= size && !b->head.in_use)
             {
-                // b->in_use = 1;
+                // b->head.in_use = 1;
                 return fix_free_list((blk_t *)b);
             }
-            b = (struct head_ *)b->next;
+            b = NEXT(b);
         }
     }
     else if (BEST_FIT)
     {
-        struct head_ *b = (struct head_ *)FREELIST,
+        blk_t *b = FREELIST,
                      *res = 0;
         while (b)
         {
-            if (b->size >= size && !b->in_use)
+            if (b->head.size >= size && !b->head.in_use)
             {
-                if (b->size == size)
+                if (b->head.size == size)
                 {
                     return fix_free_list((blk_t *)b);
                 }
-                if (res ? res->size > b->size : 1)
+                if (res ? res->head.size > b->head.size : 1)
                     res = b;
             }
-            b = (struct head_ *)b->next;
+            b = NEXT(b);
         }
         if (res)
         {
@@ -137,16 +145,17 @@ static void *reuse_block(size_t size)
     }
     else if (NEXT_FIT)
     {
-        struct head_ *b = (struct head_ *)(LAST_FIT ? LAST_FIT : FREELIST);
+        blk_t*b = (LAST_FIT ? LAST_FIT : FREELIST);
         while (b)
         {
-            if (b->size >= size && !b->in_use)
+            if (b->head.size >= size && !b->head.in_use)
             {
-                LAST_FIT = b->next;
+                LAST_FIT = NEXT(b);
                 return fix_free_list((blk_t *)b);
+                
             }
-            b = (struct head_ *)(b->next ? b->next : FREELIST);
-            if ((b == ((struct head_ *)FREELIST) && LAST_FIT == 0) || ((blk_t *)b) == LAST_FIT)
+            b =NEXT(b) ? NEXT(b) : FREELIST;
+            if ((b == (FREELIST) && LAST_FIT == 0) || ((blk_t *)b) == LAST_FIT)
             {
                 return 0;
             }
@@ -200,10 +209,10 @@ static void *alloc(size_t sz)
 static void merge(blk_t *b)
 {
     blk_t *nb = GET_SUCCESSIVE_HEAD(b);
-    b->head.next = nb->head.next;
+    SET_NEXT(b,NEXT(nb));
     size_t _ = b->head.size, k = META_RESIZE(nb->head.size);
     b->head.size += META_RESIZE(nb->head.size);
-    adjust_free_list(nb, b, nb->head.next);
+    adjust_free_list(nb, b, NEXT(nb));
     // printf("merge %zu, %zu+%zu\n", b->head.size, META_RESIZE(nb->head.size), _);
 }
 static void afree(void *b)
@@ -231,13 +240,13 @@ static void afree(void *b)
         }
         else
         {
-            FREETOP->head.next = h;
+            SET_NEXT(FREETOP,h);
         }
 
         PREV(h) = FREETOP;
         //_ = PREV(h);
         FREETOP = h;
-        h->head.next = 0;
+        SET_NEXT(h, 0);
     }
 }
 int main()
@@ -250,7 +259,7 @@ int main()
     afree(b);
     c = alloc(20);
     afree(c);
-    exit(9);
+    //exit(9);
     // printf("%i ; %zu\n", 3, get_head(b)->head.sz);
 
     clock_t t;
