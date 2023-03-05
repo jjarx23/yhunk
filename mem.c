@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
 #include "mem.h"
 
 typedef struct blk_ blk_t;
@@ -118,13 +119,29 @@ blk_t *segregated_tops[17];
 blk_t *segregated_last_fits[17];
 
 void *limit = 0;
+void *cbrk=0, *cmbrk=0;
+size_t heap_size=1024*1024*4;
 
 static void afree(void *b);
 
+static void *csbrk(size_t s){
+    if(!cbrk){
+        cbrk = mmap(0, heap_size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
+        cmbrk=cbrk+heap_size;
+    }
+    if(!s)return cbrk;
+    void *ptr=cbrk+s;
+    if(ptr>cmbrk)
+    return (void *)-1;
+    void *_=cbrk;
+    cbrk=ptr;
+    return _;
+}
+
 static void *get_mem_chunk(size_t sz)
 {
-    blk_t *brk = sbrk(0);
-    if (sbrk(sz) == (void *)-1)
+    blk_t *brk = csbrk(0);
+    if (csbrk(sz) == (void *)-1)
         return 0;
     else
         limit = ((char *)brk) + sz;
