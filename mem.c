@@ -1,9 +1,10 @@
+#include <pthread.h>
 #include <unistd.h>
 #include <time.h>
-#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <stdlib.h>
 #include "mem.h"
 
 typedef struct blk_ blk_t;
@@ -108,6 +109,8 @@ size_t min_alloc = 2*sizeof(void*);
 #define MBSTAT(a,b,c)
 #define FRED(a)
 #endif
+#define LOCK if(mutex_available)pthread_mutex_lock(&lock);
+#define UNLOCK if(mutex_available)pthread_mutex_unlock(&lock);
 // blk_t *heap_start = 0;
 // blk_t *top;
 
@@ -118,6 +121,9 @@ blk_t *segregated_list[17];
 blk_t *segregated_tops[17];
 blk_t *segregated_last_fits[17];
 
+char mutex_available=0;
+pthread_mutex_t lock;
+
 void *limit = 0;
 void *cbrk=0, *cmbrk=0;
 size_t heap_size=1024*1024*4;
@@ -125,10 +131,6 @@ size_t heap_size=1024*1024*4;
 static void afree(void *b);
 
 static void *csbrk(size_t s){
-    if(!cbrk){
-        cbrk = mmap(0, heap_size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
-        cmbrk=cbrk+heap_size;
-    }
     if(!s)return cbrk;
     void *ptr=cbrk+s;
     if(ptr>cmbrk)
@@ -280,12 +282,23 @@ if(sz<min_alloc)sz=min_alloc;
     ALLOCN(sz);
     if (list_index < 0)
     {
+        if(!pthread_mutex_init(&lock, NULL))
+        mutex_available=1;
+        if(mutex_available)pthread_mutex_lock(&lock);
+        if(!cbrk){
+        cbrk = mmap(0, heap_size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
+        cmbrk=cbrk+heap_size;
+    }
         memset(segregated_list, 0, sizeof(segregated_list));
         memset(segregated_tops, 0, sizeof(segregated_tops));
         memset(segregated_last_fits, 0, sizeof(segregated_last_fits));
+        if(mutex_available)pthread_mutex_unlock(&lock);
     }
+    LOCK;
     set_list_index(sz);
+    
     if(!FREELIST&&segregated_list[16])list_index=16;
+    
     LINDXN;
     // printf("alloc %zu\n", sz);
     blk_t *b;
@@ -294,6 +307,7 @@ if(sz<min_alloc)sz=min_alloc;
         RUBLK(b);
         if (CAN_SPLIT(b, sz))
             split(b, sz);
+            UNLOCK;
         return MEM(b);
     }
     NWBLK(sz);
@@ -301,11 +315,13 @@ if(sz<min_alloc)sz=min_alloc;
     if (!b)
     {
         fwrite("OOM...\n", 1, 7, stderr);
-        exit(-3);
+        UNLOCK;
+        return 0;
     }
     //b->head.in_use = 1;
     SET_SIZE_USE(b, sz);
     NWLN;
+    UNLOCK;
     return MEM(b);
 }
 static void merge(blk_t *b)
@@ -328,9 +344,12 @@ static void afree(void *b)
         return;
     blk_t *h = GET_HEAD(b);
     FBLK(h);
-    
+    LOCK;
     if (!IN_USE(h))
+    {
+        UNLOCK;
         return;
+    }
     TOGGLE_USE(h);
     if (CAN_MERGE(h))
         merge(h);
@@ -357,68 +376,58 @@ set_list_index(SIZE(h));
         FREETOP = h;
         SET_NEXT(h, 0);
     FRED(h);
+    UNLOCK;
 }
-int main()
-{
-    void *b = alloc(3);
-    afree(b);
-    void *c = alloc(25);
-    afree(c);
-    b = alloc(3);
-    afree(b);
-    c = alloc(20);
-    afree(c);
-    //exit(9);
-    // printf("%i ; %zu\n", 3, get_head(b)->head.sz);
-
-    clock_t t;
-
-    t = TIMER;
-    // work here
-    int i = 100000;
-    int j = 0;
-    void *_[i];
-    while (i)
-    {
-        i--;
-        _[j] = (malloc((100000 - i) % 83 + 3));
-        if (i % 13)
-            free(_[j]);
-        else
-        {
-            j++;
+static void *re_alloc(void *b, size_t sz){
+    if(!b)return 0;
+    else {
+        sz=ALIGN(sz);
+        blk_t *h=GET_HEAD(b);
+        LOCK;
+        if(sz<=SIZE(h)){
+            UNLOCK;
+            return b;
+        }
+        else if(b+SIZE(h)==limit){
+            size_t rem=sz- SIZE(h);
+            get_mem_chunk(rem);
+            SET_SIZE_USE(h, sz);
+            UNLOCK;
+            return b;
+        }
+        else{
+            void *n =alloc(sz);
+            memcpy(n, b, SIZE(h));
+            afree(b);
+            UNLOCK;
+            return n;
         }
     }
-    while (j)
-    {
-        j--;
-        free(_[j]);
-    }
-
-    printf(" took %f seconds to execute \n", TTIME(t));
-
-    t = TIMER;
-
-    // work here
-    i = 100000;
-    j = 0;
-    while (i)
-    {
-        i--;
-        _[j] = (alloc((100000 - i) % 83 + 3));
-        if (i % 13)
-            afree(_[j]);
-        else
-        {
-            j++;
-        }
-    }
-    while (j)
-    {
-        j--;
-        afree(_[j]);
-    }
-
-    printf(" took %f seconds to execute \n", TTIME(t));
-    return 0;
 }
+void *malloc(size_t sz){
+    return alloc(sz);
+}
+void *calloc(size_t n, size_t s){
+    size_t size;
+    void *block;
+    if (!n || !s)
+    return NULL;
+    size = n * s;
+    /* check mul overflow */
+    if (s != size / n)
+    return NULL;
+    block = malloc(size);
+    if (!block)
+    return NULL;
+    memset(block, 0, size);
+    return block;
+}
+void free(void *b){
+    return afree(b);
+}
+void *realloc(void *b, size_t s){
+    return re_alloc(b, s);
+}
+#ifndef MEM_LIB
+
+#endif

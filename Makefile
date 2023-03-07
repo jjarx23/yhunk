@@ -11,7 +11,7 @@ INCLUDES=-I../common_header -I.
 main:
 	$(CC) -o $(HOME)/$(OUT) $(INCLUDES) $(CFLAGS) $(SRC) $(LFLAGS) && chmod +x $(HOME)/$(OUT) && $(OUT)
 lib:
-	$(CC) -shared -o $(HOME)/lib$(OUT).so -D_LIB_ $(INCLUDES) $(CFLAGS) $(SRC) $(LFLAGS) && chmod +x $(HOME)/lib$(OUT).so && echo lib$(OUT).so built
+	$(CC) -shared -o $(HOME)/lib$(OUT).so -D MEM_LIB $(INCLUDES) $(CFLAGS) $(SRC) $(LFLAGS) && chmod +x $(HOME)/lib$(OUT).so && echo lib$(OUT).so built
 debug:
 	$(CC) $(GCFLAGS) -o $(HOME)/$(OUT) $(INCLUDES) $(CFLAGS) $(SRC) $(LFLAGS) && chmod +x $(HOME)/$(OUT) && $(OUT)
 dblib:
