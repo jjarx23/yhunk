@@ -5,7 +5,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <stdlib.h>
-#include "mem.h"
+//#include "mem.h"
 
 typedef struct blk_ blk_t;
 struct head_
@@ -271,6 +271,7 @@ static inline void set_list_index(size_t sz)
 }
 static void *alloc(size_t sz)
 {
+    //UNLOCK;
     NWLN;
     ALLOCN(sz);
     if (!sz)
@@ -294,7 +295,6 @@ if(sz<min_alloc)sz=min_alloc;
         memset(segregated_last_fits, 0, sizeof(segregated_last_fits));
         if(mutex_available)pthread_mutex_unlock(&lock);
     }
-    LOCK;
     set_list_index(sz);
     
     if(!FREELIST&&segregated_list[16])list_index=16;
@@ -307,7 +307,7 @@ if(sz<min_alloc)sz=min_alloc;
         RUBLK(b);
         if (CAN_SPLIT(b, sz))
             split(b, sz);
-            UNLOCK;
+            //UNLOCK;
         return MEM(b);
     }
     NWBLK(sz);
@@ -315,13 +315,13 @@ if(sz<min_alloc)sz=min_alloc;
     if (!b)
     {
         fwrite("OOM...\n", 1, 7, stderr);
-        UNLOCK;
+        //UNLOCK;
         return 0;
     }
     //b->head.in_use = 1;
     SET_SIZE_USE(b, sz);
     NWLN;
-    UNLOCK;
+    //UNLOCK;
     return MEM(b);
 }
 static void merge(blk_t *b)
@@ -340,14 +340,14 @@ static void merge(blk_t *b)
 }
 static void afree(void *b)
 {
+    //UNLOCK;
     if (!b)
         return;
     blk_t *h = GET_HEAD(b);
     FBLK(h);
-    LOCK;
     if (!IN_USE(h))
     {
-        UNLOCK;
+        //UNLOCK;
         return;
     }
     TOGGLE_USE(h);
@@ -376,38 +376,45 @@ set_list_index(SIZE(h));
         FREETOP = h;
         SET_NEXT(h, 0);
     FRED(h);
-    UNLOCK;
+    //UNLOCK;
 }
 static void *re_alloc(void *b, size_t sz){
-    if(!b)return 0;
+        //UNLOCK;
+    if(!b){
+        //UNLOCK;
+        return 0;
+    }
     else {
         sz=ALIGN(sz);
         blk_t *h=GET_HEAD(b);
-        LOCK;
         if(sz<=SIZE(h)){
-            UNLOCK;
+            //UNLOCK;
             return b;
         }
         else if(b+SIZE(h)==limit){
             size_t rem=sz- SIZE(h);
             get_mem_chunk(rem);
             SET_SIZE_USE(h, sz);
-            UNLOCK;
+            //UNLOCK;
             return b;
         }
         else{
             void *n =alloc(sz);
             memcpy(n, b, SIZE(h));
             afree(b);
-            UNLOCK;
+            //UNLOCK;
             return n;
         }
     }
 }
 void *malloc(size_t sz){
-    return alloc(sz);
+    LOCK;
+    void *_= alloc(sz);
+    UNLOCK;
+    return _;
 }
 void *calloc(size_t n, size_t s){
+    LOCK;
     size_t size;
     void *block;
     if (!n || !s)
@@ -420,10 +427,14 @@ void *calloc(size_t n, size_t s){
     if (!block)
     return NULL;
     memset(block, 0, size);
+    UNLOCK;
     return block;
 }
 void free(void *b){
-    return afree(b);
+    LOCK;
+     afree(b);
+     UNLOCK;
+     return;
 }
 void *realloc(void *b, size_t s){
     return re_alloc(b, s);

@@ -1,28 +1,63 @@
-OUT=alloc
-CC=gcc
-HOME=/data/data/com.termux/files/home
-SRC=./*.c
-OBJ=$(SRC:.c=.o)
-CFLAGS=-x c -fPIE -fPIC -O3 -ffinite-math-only -Ofast -funroll-loops
-GCFLAGS= -g -Og
-LFLAGS=-L$(HOME) -lm
-INCLUDES=-I../common_header -I.
+TITLE := alloc
+OUT := $(TITLE)
+CC := gcc
+CFLAGS := -c 
+LDFLAGS := -L$$HOME -lpthread
+GCFLAGS := -ggdb -Og
+OBJDIR := ../$(TITLE)_obj/
+SRCDIRS := $(wildcard */*/*/) $(wildcard */*/) $(wildcard */)
+OBJDIRS := $(OBJDIR) $(SRCDIRS:%/=$(OBJDIR)%/)
+SRC := $(wildcard */*/*/*.c */*/*.c */*.c *.c)
+OBJ := $(SRC:%.c=$(OBJDIR)%.o)
 
-main:
-	$(CC) -o $(HOME)/$(OUT) $(INCLUDES) $(CFLAGS) $(SRC) $(LFLAGS) && chmod +x $(HOME)/$(OUT) && $(OUT)
-lib:
-	$(CC) -shared -o $(HOME)/lib$(OUT).so -D MEM_LIB $(INCLUDES) $(CFLAGS) $(SRC) $(LFLAGS) && chmod +x $(HOME)/lib$(OUT).so && echo lib$(OUT).so built
-debug:
-	$(CC) $(GCFLAGS) -o $(HOME)/$(OUT) $(INCLUDES) $(CFLAGS) $(SRC) $(LFLAGS) && chmod +x $(HOME)/$(OUT) && $(OUT)
-dblib:
-	$(CC) -shared $(GCFLAGS) -D_LIB_ -o $(HOME)/lib$(OUT).so $(INCLUDES) $(CFLAGS) $(SRC) $(LFLAGS) && chmod +x $(HOME)/$(OUT) && echo lib$(OUT).so built
-#app:
-#	gcc -shared -fPIC -g -Og fish_main.c -o $(HOME)/libfish.so -lm && chmod +x $(HOME)/libfish.so
-#all:
-#	gcc -o $(HOME)/$(OUT) $(INCLUDES) $(SRC) $(CFLAGS) $(LFLAGS)
-#lib:
-#	gcc -shared -o $(HOME)/lib$(OUT).so $(INCLUDES) $(SRC) $(CFLAGS) $(LFLAGS)
-#gall:
-#	gcc -o $(HOME)/$(OUT) $(INCLUDES) $(SRC) $(CFLAGS) $(LFLAGS) -g
-#glib:
-#	gcc -shared -o $(HOME)/lib$(OUT).so $(INCLUDES) $(SRC) $(CFLAGS) $(LFLAGS) -g
+ifneq ($(debug),1)
+CFLAGS += -O3
+else
+CFLAGS +=  $(GCFLAGS)
+endif
+
+ifeq ($(as),dyn)
+CFLAGS += -D AS_LIB -fPIC
+LDFLAGS += -shared
+OUT := lib$(TITLE).so
+else
+ifeq ($(as), static)
+CFLAGS := -D AS_LIB
+OUT := lib$(OUT).a
+endif
+endif
+
+ALL: PREBUILD APP POSTBUILD
+	@echo $(OUT) built
+	@echo
+
+PREBUILD:
+	@mkdir -p $(OBJDIRS)
+	@echo created obj dirs: $(OBJDIRS)
+	@echo
+
+APP: $(OBJ)
+ifeq ($(as), static)
+	@arc rcs $(OUT) $^
+else
+	@$(CC) $(LDFLAGS) $^ -o $(OUT)
+endif
+	@echo
+
+$(OBJDIR)%.o:%.c
+	@$(CC) $(CFLAGS) $^ -o $@
+	@echo $@ built
+	@echo
+
+POSTBUILD:
+	@mv $(OUT) $$HOME
+	@chmod +x $$HOME/$(OUT)
+	@echo done!
+	@echo
+
+clean:
+	@rm -r $(OBJDIR)
+	@echo $(OBJDIR) cleaned
+	@echo
+
+.PHONY: ALL PREBUILD APP POSTBUILD clean
