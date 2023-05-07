@@ -1,4 +1,4 @@
-#memalloc
+#yhunk
 This repo is a practice repo.
 It is a memory allocator project in C.
 Based on a tutorial by Dmitri Soshnikov.
