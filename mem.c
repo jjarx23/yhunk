@@ -5,9 +5,9 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <stdlib.h>
-// #include "mem.h"
 
 typedef struct blk_ blk_t;
+
 struct head_
 {
 #ifndef SMALL_META
@@ -18,6 +18,7 @@ struct head_
     void *meta;
 #endif
 };
+
 struct blk_
 {
     struct head_ head;
@@ -27,97 +28,10 @@ struct blk_
 #endif
 };
 
-#define BLK(B) ((blk_t *)(B))
-#ifndef SMALL_META
-#define MIN_SIZE (META_RESIZE(sizeof(void *)))
-#define NEXT(b) (BLK(b)->head.nxt)
-#define SET_NEXT(b, s) (BLK(b)->head.nxt = (s))
-
-#define SIZE(b) (BLK(b)->head.sze)
-#define SET_SIZE(b, s) (BLK(b)->head.sze = (s))
-#define SET_SIZE_USE(b, s) \
-    SET_SIZE(b, s);        \
-    b->head.inuse = 1;
-
-#define IN_USE(b) (BLK(b)->head.inuse)
-#define TOGGLE_USE(b) (BLK(b)->head.inuse ^= 1)
-
-#define PREV(b) (BLK(b)->pntr)
-#define SET_PREV(b, s) (((blk_t **)&BLK(b)->pntr)[0] = (s))
-#else
-size_t min_alloc = 2 * sizeof(void *);
-#define MIN_SIZE (META_RESIZE(min_alloc))
-#define PREV(b) (BLK(b)->prev)
-#define SET_PREV(b, s) (b->prev = (s))
-
-#define SIZE(b) ((size_t)BLK(b)->head.meta & ~1L)
-#define SET_SIZE(b, s) (((size_t *)&BLK(b)->head.meta)[0] = (s))
-#define SET_SIZE_USE(b, s) SET_SIZE(b, s | 1L);
-
-#define IN_USE(b) ((size_t)BLK(b)->head.meta & 1L)
-#define TOGGLE_USE(b) SET_SIZE(b, IN_USE(b) ? SIZE(b) : SIZE(b) | 1L)
-
-#define NEXT(b) (BLK(b)->pntr)
-#define SET_NEXT(b, s) (((blk_t **)&BLK(b)->pntr)[0] = (s))
-#endif
-
-#define MEM(b) ((void *)&BLK(b)->pntr)
-
-#define ALIGN(n) (n + sizeof(void *) - 1) & ~(sizeof(void *) - 1)
-#define META_RESIZE(n) (sizeof(struct head_) + (n))
-#define CAN_SPLIT(b, sz) ((SIZE(b) - sz) >= MIN_SIZE)
-#define GET_HEAD(b) ((blk_t *)(((char *)b) - sizeof(struct head_)))
-#define GET_SUCCESSIVE_HEAD(b) BLK((char *)&BLK(b)->pntr + SIZE(b))
-#define CAN_MERGE(b) ((list_index >= 0) && (GET_SUCCESSIVE_HEAD(b) != limit) && (!IN_USE(GET_SUCCESSIVE_HEAD(b))))
-#define LIST_INDEX(sz) (sz / sizeof(void *) - 1)
-
-#define FREELIST segregated_list[list_index]
-#define FREETOP segregated_tops[list_index]
-#define LAST_FIT segregated_last_fits[list_index]
-
-#define FIRST_FIT 0
-#define BEST_FIT 01
-#define NEXT_FIT 0
-
-#define TIMER clock()
-#define TTIME(t) (((double)(clock() - t)) / CLOCKS_PER_SEC)
-
-#ifdef DINFO
-#define NWBLK(s) printf("getting new block [%zu]\n", (size_t)s);
-#define NWLN putchar('\n');
-#define ALLOCN(s) printf("alloc'n %zu\n", (size_t)s);
-#define LINDXN printf("using index %i\n", list_index + 1);
-#define RUBLK(b) printf("reusing block(%p)[%zu]\n", b, (size_t)SIZE(b));
-#define UBESTF printf("using BEST FIT\n");
-#define BFAM(n, a, b, c) printf("blocks %i: %p %p %p\n", n, a, b, c);
-#define SPLBK(a, b, sa, sb, os) printf("blk(%p)[%zu]=blk(%p)[%zu]+blk(%p)[%zu]\n", a, (size_t)os, a, (size_t)sa, b, (size_t)sb);
-#define FBLK(b) printf("free block(%p)[%zu]\n", b, (size_t)SIZE(b));
-#define MBLK(a, b) printf("merge blk(%p)[%zu] <-> blk(%p)[%zu]\n", a, (size_t)SIZE(a), b, (size_t)SIZE(b));
-#define MBSTAT(a, b, c) printf("%zu+%zu=%zu\n", a, b, c);
-#define FRED(a) printf("free'd blk(%p)[%zu]\n", a, (size_t)SIZE(a));
-#else
-
-#define NWBLK(s)
-#define NWLN
-#define ALLOCN(s)
-#define LINDXN
-#define RUBLK(b)
-#define UBESTF
-#define BFAM(n, a, b, c)
-#define SPLBK(a, b, sa, sb, os)
-#define FBLK(b)
-#define MBLK(a, b)
-#define MBSTAT(a, b, c)
-#define FRED(a)
-#endif
-#define LOCK             \
-    if (mutex_available) \
-        pthread_mutex_lock(&lock);
-#define UNLOCK           \
-    if (mutex_available) \
-        pthread_mutex_unlock(&lock);
-// blk_t *heap_start = 0;
-// blk_t *top;
+const int first_fit = 1;
+const int best_fit = 2;
+const int next_fit = 3;
+const int search_method = first_fit;
 
 int list_index = -1;
 size_t gen_size = 17 * sizeof(void *);
@@ -132,6 +46,212 @@ pthread_mutex_t lock;
 void *limit = 0;
 void *cbrk = 0, *cmbrk = 0;
 size_t heap_size = 1024 * 1024 * 4;
+
+static inline blk_t *BLK(void *B)
+{
+    return (blk_t *)(B);
+}
+
+
+static inline size_t META_RESIZE(size_t n)
+{
+    return sizeof(struct head_) + (n);
+}
+
+#ifndef SMALL_META
+static inline size_t MIN_SIZE()
+{
+    return META_RESIZE(sizeof(void *));
+}
+
+static inline blk_t *NEXT(blk_t *b)
+{
+    return BLK(b->head.nxt);
+}
+
+static inline void SET_NEXT(blk_t *b, blk_t *s)
+{
+    b->head.nxt = s;
+}
+
+static inline size_t SIZE(blk_t *b)
+{
+    return BLK(b)->head.sze;
+}
+
+static inline void SET_SIZE(blk_t *b, size_t s)
+{
+    BLK(b)->head.sze = s;
+}
+
+static inline void SET_SIZE_USE(blk_t *b, size_t s)
+{
+    SET_SIZE(b, s);
+    b->head.inuse = 1;
+}
+
+static inline char IN_USE(blk_t *b)
+{
+    return BLK(b)->head.inuse;
+}
+
+static inline void TOGGLE_USE(blk_t *b)
+{
+    BLK(b)->head.inuse ^= 1;
+}
+
+static inline void *PREV(blk_t *b)
+{
+    return BLK(b)->pntr;
+}
+
+static inline void SET_PREV(blk_t *b, blk_t *s)
+{
+    ((blk_t **)&BLK(b)->pntr)[0] = s;
+}
+
+#else
+
+size_t min_alloc = 2 * sizeof(void *);
+
+static inline size_t MIN_SIZE()
+{
+    return META_RESIZE(min_alloc);
+}
+
+static inline void *PREV(blk_t *b)
+{
+    return BLK(b)->prev;
+}
+
+static inline void SET_PREV(blk_t *b, blk_t *s)
+{
+    b->prev = s;
+}
+
+static inline size_t SIZE(blk_t *b)
+{
+    return ((size_t)BLK(b)->head.meta & ~1L);
+}
+
+static inline void SET_SIZE(blk_t *b, size_t s)
+{
+    ((size_t *)&BLK(b)->head.meta)[0] = s;
+}
+
+static inline void SET_SIZE_USE(blk_t *b, size_t s)
+{
+    SET_SIZE(b, s | 1L);
+}
+
+static inline char IN_USE(blk_t *b)
+{
+    return ((size_t)BLK(b)->head.meta & 1L);
+}
+
+static inline void TOGGLE_USE(blk_t *b)
+{
+    SET_SIZE(b, IN_USE(b) ? SIZE(b) : SIZE(b) | 1L);
+}
+
+static inline blk_t *NEXT(blk_t *b)
+{
+    return BLK(b)->pntr;
+}
+
+static inline void SET_NEXT(blk_t *b, blk_t *s)
+{
+    ((blk_t **)&BLK(b)->pntr)[0] = s;
+}
+
+#endif
+
+static inline void *MEM(blk_t *b)
+{
+    return (void *)&BLK(b)->pntr;
+}
+
+static inline size_t ALIGN(size_t n)
+{
+    return (n + sizeof(void *) - 1) & ~(sizeof(void *) - 1);
+}
+
+static inline char CAN_SPLIT(blk_t *b, size_t sz)
+{
+    return (SIZE(b) - sz) >= MIN_SIZE();
+}
+
+static inline blk_t *GET_HEAD(void *b)
+{
+    return (blk_t *)(((char *)b) - sizeof(struct head_));
+}
+
+static inline blk_t *GET_SUCCESSIVE_HEAD(blk_t *b)
+{
+    return BLK((char *)&BLK(b)->pntr + SIZE(b));
+}
+
+static inline char CAN_MERGE(blk_t *b)
+{
+    return (list_index >= 0) && (GET_SUCCESSIVE_HEAD(b) != limit) && (!IN_USE(GET_SUCCESSIVE_HEAD(b)));
+}
+
+static inline int LIST_INDEX(size_t sz)
+{
+    return (sz / sizeof(void *)) - 1;
+}
+
+static inline blk_t *FREELIST()
+{
+    return segregated_list[list_index];
+}
+
+static inline void SET_FREELIST(blk_t *value)
+{
+    segregated_list[list_index] = value;
+}
+
+static inline blk_t *FREETOP()
+{
+    return segregated_tops[list_index];
+}
+
+static inline void SET_FREETOP(blk_t *value)
+{
+    segregated_tops[list_index] = value;
+}
+
+static inline blk_t *LAST_FIT()
+{
+    return segregated_last_fits[list_index];
+}
+
+static inline void SET_LAST_FIT(blk_t *value)
+{
+    segregated_last_fits[list_index] = value;
+}
+
+static inline clock_t TIMER()
+{
+    return clock();
+}
+
+static inline double TTIME(clock_t t)
+{
+    return (((double)(clock() - t)) / CLOCKS_PER_SEC);
+}
+
+static inline void LOCK()
+{
+    if (mutex_available)
+        pthread_mutex_lock(&lock);
+}
+
+static inline void UNLOCK()
+{
+    if (mutex_available)
+        pthread_mutex_unlock(&lock);
+}
 
 static void afree(void *b);
 
@@ -158,17 +278,17 @@ static void *get_mem_chunk(size_t sz)
 }
 static inline void adjust_free_list(blk_t *b, blk_t *prev, blk_t *next)
 {
-    if (b == FREELIST)
+    if (b == FREELIST())
     {
-        FREELIST = prev;
+        SET_FREELIST(prev);
         if (!FREELIST)
-            FREELIST = next;
+            SET_FREELIST(next);
     }
-    if (b == FREETOP)
+    if (b == FREETOP())
     {
-        FREETOP = next;
-        if (!FREETOP)
-            FREETOP = prev;
+        SET_FREETOP(next);
+        if (!FREETOP())
+            SET_FREETOP(prev);
     }
 }
 static inline void *fix_free_list(blk_t *b, blk_t *p, blk_t *n)
@@ -193,12 +313,14 @@ static inline void *fix_free_list(blk_t *b, blk_t *p, blk_t *n)
 }
 static void *reuse_block(size_t size)
 {
-    if (!FREELIST)
+    if (!FREELIST())
         return 0;
     // blk_t *p=0;
-    if (FIRST_FIT)
+    switch (search_method)
     {
-        blk_t *b = FREELIST;
+    case first_fit:
+    {
+        blk_t *b = FREELIST();
         while (b)
         {
             if (SIZE(b) >= size && !IN_USE(b))
@@ -210,10 +332,10 @@ static void *reuse_block(size_t size)
             b = NEXT(b);
         }
     }
-    else if (BEST_FIT)
+    break;
+    case best_fit:
     {
-        UBESTF;
-        blk_t *b = FREELIST,
+        blk_t *b = FREELIST(),
               *res = 0;
         while (b)
         {
@@ -238,23 +360,28 @@ static void *reuse_block(size_t size)
         }
         return res;
     }
-    else if (NEXT_FIT)
+    break;
+    case next_fit:
     {
-        blk_t *b = (LAST_FIT ? LAST_FIT : FREELIST);
+        blk_t *b = (LAST_FIT ? LAST_FIT : FREELIST());
         while (b)
         {
             if (SIZE(b) >= size && !IN_USE(b))
             {
-                LAST_FIT = NEXT(b);
+                SET_LAST_FIT(NEXT(b));
                 return fix_free_list((blk_t *)b, PREV(b), NEXT(b));
             }
             // p=b;
-            b = NEXT(b) ? NEXT(b) : FREELIST;
-            if ((b == (FREELIST) && LAST_FIT == 0) || ((blk_t *)b) == LAST_FIT)
+            b = NEXT(b) ? NEXT(b) : FREELIST();
+            if ((b == (FREELIST()) && LAST_FIT == 0) || ((blk_t *)b) == LAST_FIT)
             {
                 return 0;
             }
         }
+    }
+    break;
+    default:
+        printf("unknown method\n");
     }
     return 0;
 }
@@ -264,7 +391,6 @@ static void split(blk_t *b, size_t sz)
     size_t osize;
     SET_SIZE_USE(bb, osize = SIZE(b) - META_RESIZE(sz));
     SET_SIZE_USE(b, sz);
-    SPLBK(b, bb, sz, SIZE(bb), osize);
     afree(MEM(bb));
 }
 static inline void set_list_index(size_t sz)
@@ -277,21 +403,18 @@ static inline void set_list_index(size_t sz)
     {
         list_index = LIST_INDEX(sz);
     }
-    LINDXN;
 }
 static void *alloc(size_t sz)
 {
     // UNLOCK;
-    NWLN;
-    ALLOCN(sz);
     if (!sz)
         return 0;
+    // Align size to ensure proper memory alignment
     sz = ALIGN(sz);
 #ifdef SMALL_META
     if (sz < min_alloc)
         sz = min_alloc;
 #endif
-    ALLOCN(sz);
     if (list_index < 0)
     {
         if (!pthread_mutex_init(&lock, NULL))
@@ -311,21 +434,18 @@ static void *alloc(size_t sz)
     }
     set_list_index(sz);
 
-    if (!FREELIST && segregated_list[16])
+    if (!FREELIST() && segregated_list[16])
         list_index = 16;
 
-    LINDXN;
     // printf("alloc %zu\n", sz);
     blk_t *b;
     if ((b = reuse_block(sz)))
     {
-        RUBLK(b);
         if (CAN_SPLIT(b, sz))
             split(b, sz);
         // UNLOCK;
         return MEM(b);
     }
-    NWBLK(sz);
     b = get_mem_chunk(META_RESIZE(sz));
     if (!b)
     {
@@ -335,7 +455,6 @@ static void *alloc(size_t sz)
     }
     // b->head.in_use = 1;
     SET_SIZE_USE(b, sz);
-    NWLN;
     // UNLOCK;
     return MEM(b);
 }
@@ -343,13 +462,11 @@ static void merge(blk_t *b)
 {
     blk_t *nb = GET_SUCCESSIVE_HEAD(b);
     set_list_index(SIZE(nb));
-    MBLK(b, nb);
     SET_NEXT(b, NEXT(nb));
     size_t _ = SIZE(b), k = META_RESIZE(SIZE(nb)),
            new_size = SIZE(b) + META_RESIZE(SIZE(nb));
     SET_SIZE(b, new_size);
     fix_free_list(nb, PREV(nb), NEXT(nb));
-    MBSTAT(new_size, k, _);
     // adjust_free_list(nb, b, NEXT(nb));
     //  printf("merge %zu, %zu+%zu\n", b->head.size, META_RESIZE(nb->head.size), _);
 }
@@ -359,7 +476,6 @@ static void afree(void *b)
     if (!b)
         return;
     blk_t *h = GET_HEAD(b);
-    FBLK(h);
     if (!IN_USE(h))
     {
         // UNLOCK;
@@ -376,20 +492,19 @@ else
 top = b;
 b->head.next = 0;*/
     set_list_index(SIZE(h));
-    if (!FREELIST)
+    if (!FREELIST())
     {
-        FREELIST = h;
+        SET_FREELIST(h);
     }
     else
     {
-        SET_NEXT(FREETOP, h);
+        SET_NEXT(FREETOP(), h);
     }
 
-    SET_PREV(h, FREETOP);
+    SET_PREV(h, FREETOP());
     //_ = PREV(h);
-    FREETOP = h;
+    SET_FREETOP(h);
     SET_NEXT(h, 0);
-    FRED(h);
     // UNLOCK;
 }
 static void *re_alloc(void *b, size_t sz)
